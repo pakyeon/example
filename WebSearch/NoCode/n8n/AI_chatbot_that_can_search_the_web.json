@@ -1,0 +1,162 @@
+{
+  "name": "AI chatbot that can search the web",
+  "nodes": [
+    {
+      "parameters": {
+        "options": {
+          "temperature": 0.3
+        }
+      },
+      "id": "f4f8bf03-a43e-4a1f-a592-cd0f8408f552",
+      "name": "Chat OpenAI",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "position": [
+        580,
+        540
+      ],
+      "typeVersion": 1,
+      "credentials": {
+        "openAiApi": {
+          "id": "XoryJLkErmX8qM2O",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "66b60f68-bae8-4958-ac81-03883f563ab3",
+      "name": "Wikipedia",
+      "type": "@n8n/n8n-nodes-langchain.toolWikipedia",
+      "position": [
+        1040,
+        540
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "contextWindowLength": 20
+      },
+      "id": "6814967b-4567-4cdd-bf09-6b1b5ed0c68e",
+      "name": "Window Buffer Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "position": [
+        740,
+        540
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "ce4358ac-c2cc-45ba-b950-247f8360b36c",
+      "name": "SerpAPI",
+      "type": "@n8n/n8n-nodes-langchain.toolSerpApi",
+      "position": [
+        940,
+        540
+      ],
+      "typeVersion": 1,
+      "credentials": {
+        "serpApi": {
+          "id": "thGxpHgQCYGl8zHl",
+          "name": "SerpAPI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.input }}",
+        "options": {}
+      },
+      "id": "de80add8-c37d-4d46-80ec-b43234e21150",
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "position": [
+        680,
+        240
+      ],
+      "typeVersion": 1.6
+    },
+    {
+      "parameters": {},
+      "id": "e279af43-b003-4499-b221-58716e735379",
+      "name": "Chat Message",
+      "type": "@n8n/n8n-nodes-langchain.manualChatTrigger",
+      "position": [
+        380,
+        240
+      ],
+      "typeVersion": 1
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "SerpAPI": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wikipedia": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chat OpenAI": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Window Buffer Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chat Message": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "2bf0da23-dae3-4c2f-a4a5-521196ada8e2",
+  "meta": {
+    "templateId": "1959",
+    "instanceId": "08f73e476764d5530ee05fcd637fe07a1c8cb97fe0a8c6ae0ee43d3aafc9c5d9"
+  },
+  "id": "oWIr8hjSpga30uAF",
+  "tags": []
+}
