@@ -1,0 +1,11 @@
+lm-eval --model hf \
+    --model_args pretrained=unsloth/gemma-3-4b-it-bnb-4bit \
+    --gen_kwargs '{"eos_token_id": [1, 106]}' \
+    --tasks gsm8k_cot  \
+    --num_fewshot 0 \
+    --seed 42 \
+    --device cuda:0 \
+    --batch_size 32 \
+    --output_path ./eval_output/gsm8k \
+    --log_samples \
+    --show_config

@@ -4,11 +4,10 @@ import re
 from pathlib import Path
 from typing import NamedTuple
 from datasets import load_dataset
-from transformers import (
-    Gemma3ForConditionalGeneration,
-    AutoProcessor,
-    BitsAndBytesConfig,
-)
+from transformers import BitsAndBytesConfig
+from transformers import TextStreamer
+from peft import PeftModel
+
 import torch
 from tqdm import tqdm
 from datetime import datetime
@@ -30,22 +29,66 @@ bnb_config = BitsAndBytesConfig(
 )
 
 
-def load_model(model_name):
+# unsloth 모델을 불러올 때 사용
+def load_unsloth_model(model_name):
+    from unsloth import FastModel
+
+    model, tokenizer = FastModel.from_pretrained(
+        model_name=model_name,
+        load_in_4bit=True,
+        load_in_8bit=False,
+        full_finetuning=False,
+        dtype=torch.bfloat16,
+        device_map="auto",
+    )
+
+    return model, tokenizer
+
+
+# Gemma3 멀티모달 모델을 불러올 때 사용
+def load_multimodal_model(model_name):
+    from transformers import (
+        Gemma3ForConditionalGeneration,
+        AutoProcessor,
+    )
+
     processor = AutoProcessor.from_pretrained(model_name, use_fast=True)
     model = Gemma3ForConditionalGeneration.from_pretrained(
         model_name,
-        device_map="auto",
         torch_dtype=torch.bfloat16,
-        quantization_config=bnb_config,
+        # quantization_config=bnb_config,
         attn_implementation="eager",
     )
 
     return model, processor.tokenizer
 
 
+def load_merge_model(model_name, adapter_path):
+    from transformers import (
+        Gemma3ForConditionalGeneration,
+        AutoProcessor,
+    )
+
+    processor = AutoProcessor.from_pretrained(model_name, use_fast=True)
+    base_model = Gemma3ForConditionalGeneration.from_pretrained(
+        model_name,
+        torch_dtype=torch.bfloat16,
+        attn_implementation="eager",  # 이 옵션 추가
+    )
+
+    model = PeftModel.from_pretrained(
+        base_model,
+        adapter_path,
+    )
+
+    model = model.merge_and_unload()
+
+    return model, processor.tokenizer
+
+
 # ===== AIME 전용 프롬프트 템플릿 =====
-AIME_PROMPT = """
-Solve the following math problem efficiently and clearly. The last line of your response should be of the following format: 'Therefore, the final answer is: $\\boxed{{ANSWER}}$. I hope it is correct'
+MATH_PROMPT = """
+Solve the following math problem efficiently and clearly.  The last line of your response must be of the following format: 'Therefore, the final answer is: $\\boxed{{ANSWER}}$. I hope it is correct' (without quotes) where ANSWER is just the final number or expression that solves the problem. Think step by step before answering.
 
 {Question}
 """.strip()
@@ -80,7 +123,7 @@ def extract_aime_answer(response):
 
 
 # ===== 평가 함수 =====
-def evaluate_aime(model, tokenizer, dataset):
+def evaluate(model, tokenizer, dataset):
     correct = 0
     total = 0
     responses = []  # 생성된 응답을 저장할 리스트 추가
@@ -94,12 +137,21 @@ def evaluate_aime(model, tokenizer, dataset):
     with torch.inference_mode():
         for idx, item in enumerate(dataset):
             # 프롬프트 생성
-            prompt = AIME_PROMPT.format(Question=item["problem"])
+            chat = [
+                # 역할(role)은 모델마다 다를 수 있음 (user, human, system 등)
+                {
+                    "role": "user",
+                    "content": MATH_PROMPT.format(Question=item["problem"]),
+                }
+            ]
+            prompt = tokenizer.apply_chat_template(
+                chat, tokenize=False, add_generation_prompt=True
+            )
+
             # 토크나이징 (attention_mask 포함)
             tokenized = tokenizer(
                 prompt,
                 return_tensors="pt",
-                padding="longest",
                 truncation=True,
                 max_length=4096,
             ).to(model.device)
@@ -109,10 +161,11 @@ def evaluate_aime(model, tokenizer, dataset):
                 input_ids=tokenized.input_ids,
                 attention_mask=tokenized.attention_mask,
                 max_new_tokens=32768,
-                pad_token_id=tokenizer.eos_token_id,
-                temperature=1,
+                temperature=1.0,
                 top_p=0.95,
                 top_k=64,
+                eos_token_id=[1, 106],
+                streamer=TextStreamer(tokenizer, skip_prompt=True),
             )
             response = tokenizer.decode(outputs[0], skip_special_tokens=True)
 
@@ -158,26 +211,29 @@ def evaluate_aime(model, tokenizer, dataset):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, required=True)
+    parser.add_argument("--adapter", type=str, default=None)
     parser.add_argument("--output_dir", type=str, default="./aime_results")
     args = parser.parse_args()
 
     # 모델 로드
-    model, tokenizer = load_model(args.model)
+    # model, tokenizer = load_multimodal_model(args.model)
+    # model, tokenizer = load_unsloth_model(args.model)
+    model, tokenizer = load_merge_model(args.model, args.adapter)
 
     # 데이터셋 로드
-    # dataset = load_dataset("HuggingFaceH4/aime_2024", split="train").select(range(1))
-    dataset = load_dataset("HuggingFaceH4/aime_2024", split="train")
+    dataset = load_dataset("HuggingFaceH4/aime_2024", split="train").select(range(2))
+    # dataset = load_dataset("HuggingFaceH4/aime_2024", split="train")
 
     # 현재 시간 기반 파일 이름 생성
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
     output_filename = f"results_{timestamp}.json"
 
     # 평가 수행
-    accuracy, responses = evaluate_aime(model, tokenizer, dataset)
+    accuracy, responses = evaluate(model, tokenizer, dataset)
 
     # 결과 저장
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
-    result = {"aime24_accuracy": accuracy, "responses": responses}
+    result = {"accuracy": accuracy, "responses": responses}
 
     with open(Path(args.output_dir) / output_filename, "w") as f:
         json.dump(result, f, indent=2)
